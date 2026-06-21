@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "0.2.0",
+  "id": "beispiel-befunde",
+  "title": "4 - Befunde & Befundgruppen",
+  "lang": "de",
+  "example": true,
+  "meta": { "source": "Didaktisches Beispiel - Normalbefund vs. auffällig (drei Zustände). Kein echtes Einsatzprotokoll." },
+  "blocks": [
+    {
+      "id": "untersuchung",
+      "title": "Untersuchung",
+      "points": [
+        { "type": "finding", "id": "haut", "label": "Haut", "normal": "rosig, warm, trocken" },
+        {
+          "type": "findingGroup",
+          "key": "B",
+          "collapsible": false,
+          "findings": [
+            { "id": "atemweg", "label": "Atemweg", "normal": "frei" },
+            { "id": "atmung", "label": "Atmung", "normal": "regelrecht, seitengleich belüftet" }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+# Beispiel-Deployment des Protokoll-Editors (image-gebackener Build-Weg).
+# Der Container spricht HTTP auf 8081; Domain + TLS liefert ein externer Reverse Proxy davor.
+#
+# Build-Kontext = Repo-Wurzel (../../), weil der Editor packages/shared + protocols
+# braucht (siehe Dockerfile). Aus apps/protocol-editor heraus:
+#   docker compose up -d --build
+services:
+  editor:
+    build:
+      context: ../../
+      dockerfile: apps/protocol-editor/Dockerfile
+    image: resqdocs-editor:latest
+    restart: unless-stopped
+    ports:
+      - "8081:8081"   # an den Reverse Proxy weiterreichen

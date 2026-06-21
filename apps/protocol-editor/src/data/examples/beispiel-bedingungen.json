@@ -1,0 +1,37 @@
+{
+  "schemaVersion": "0.2.0",
+  "id": "beispiel-bedingungen",
+  "title": "3 - Bedingungen (etwas nur zeigen, wenn ...)",
+  "lang": "de",
+  "example": true,
+  "meta": { "source": "Didaktisches Beispiel - ein Block erscheint nur unter einer Bedingung. Kein echtes Einsatzprotokoll." },
+  "variables": [
+    {
+      "id": "art",
+      "type": "select",
+      "label": "Einsatzart",
+      "default": "internistisch",
+      "options": [
+        { "value": "internistisch", "label": "internistisch" },
+        { "value": "traumatologisch", "label": "traumatologisch (Unfall)" }
+      ]
+    }
+  ],
+  "blocks": [
+    {
+      "id": "basis",
+      "title": "Basis",
+      "points": [
+        { "type": "text", "id": "immer", "content": "Dieser Block ist immer sichtbar." }
+      ]
+    },
+    {
+      "id": "unfall",
+      "title": "Unfallhergang",
+      "visibleIf": { "var": "art", "eq": "traumatologisch" },
+      "points": [
+        { "type": "field", "id": "hergang", "label": "Wie kam es zum Unfall?" }
+      ]
+    }
+  ]
+}

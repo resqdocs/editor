@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "0.2.0",
+  "id": "beispiel-variablen",
+  "title": "2 - Variablen & Anrede",
+  "lang": "de",
+  "example": true,
+  "meta": { "source": "Didaktisches Beispiel - zeigt, wie sich der Text automatisch anpasst. Kein echtes Einsatzprotokoll." },
+  "variables": [
+    {
+      "id": "geschlecht",
+      "type": "select",
+      "label": "Geschlecht",
+      "grammar": "de-gender",
+      "default": "w",
+      "options": [
+        { "value": "w", "label": "weiblich" },
+        { "value": "m", "label": "männlich" },
+        { "value": "d", "label": "divers" }
+      ]
+    },
+    { "id": "alter", "type": "number", "label": "Alter (Jahre)", "default": 0 }
+  ],
+  "blocks": [
+    {
+      "id": "situation",
+      "title": "Situation",
+      "points": [
+        { "type": "text", "id": "satz", "content": "Es wird {{der_die}} {{patient}} versorgt (Alter: {{var:alter}} Jahre)." }
+      ]
+    }
+  ]
+}

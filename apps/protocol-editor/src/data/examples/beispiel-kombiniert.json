@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "0.2.0",
+  "id": "beispiel-kombiniert",
+  "title": "5 - Alles zusammen",
+  "lang": "de",
+  "example": true,
+  "meta": { "source": "Didaktisches Beispiel - kombiniert Variablen, Bedingungen und Befunde. Kein echtes Einsatzprotokoll." },
+  "variables": [
+    {
+      "id": "geschlecht",
+      "type": "select",
+      "label": "Geschlecht",
+      "grammar": "de-gender",
+      "default": "w",
+      "options": [
+        { "value": "w", "label": "weiblich" },
+        { "value": "m", "label": "männlich" },
+        { "value": "d", "label": "divers" }
+      ]
+    },
+    { "id": "bewusstlos", "type": "boolean", "label": "Bewusstlos?", "default": false }
+  ],
+  "blocks": [
+    {
+      "id": "situation",
+      "title": "Situation",
+      "points": [
+        { "type": "text", "id": "s1", "content": "{{der_die}} {{patient}} wird angetroffen und versorgt." }
+      ]
+    },
+    {
+      "id": "untersuchung",
+      "title": "Untersuchung",
+      "points": [
+        { "type": "finding", "id": "kreislauf", "label": "Kreislauf", "normal": "stabil" },
+        {
+          "type": "findingGroup",
+          "key": "Neuro",
+          "findings": [
+            { "id": "gcs", "label": "GCS", "normal": "15" },
+            { "id": "pupillen", "label": "Pupillen", "normal": "isokor, lichtreagibel" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bewusstlosigkeit",
+      "title": "Bei Bewusstlosigkeit",
+      "visibleIf": { "var": "bewusstlos", "truthy": true },
+      "points": [
+        { "type": "list", "id": "schritte", "label": "Sofortmaßnahmen", "entries": ["Atemwege sichern", "Beatmung / stabile Seitenlage"] },
+        { "type": "field", "id": "uhrzeit", "label": "Uhrzeit der Bewusstlosigkeit" }
+      ]
+    }
+  ]
+}

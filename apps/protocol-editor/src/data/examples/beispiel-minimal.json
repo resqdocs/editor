@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "0.2.0",
+  "id": "beispiel-minimal",
+  "title": "1 - Das Einfachste",
+  "lang": "de",
+  "example": true,
+  "meta": { "source": "Didaktisches Beispiel - zeigt nur die drei einfachsten Bausteine. Kein echtes Einsatzprotokoll." },
+  "blocks": [
+    {
+      "id": "einsatz",
+      "title": "Einsatz",
+      "points": [
+        { "type": "text", "id": "einleitung", "content": "Ein fester Satz, der immer gleich erscheint." },
+        { "type": "field", "id": "ort", "label": "Einsatzort" },
+        { "type": "list", "id": "massnahmen", "label": "Maßnahmen", "entries": ["Lagerung", "Sauerstoffgabe"] }
+      ]
+    }
+  ]
+}
