@@ -122,7 +122,7 @@ const buildId = __BUILD_ID__
 
     <!-- Live-Vorschau (#224) — interaktiver Lern-Kern -->
     <main v-else-if="mode === 'preview'" class="mx-auto w-full max-w-7xl px-4 py-4">
-      <div class="grid grid-cols-1 gap-4 lg:grid-cols-[22rem_1fr]">
+      <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <section class="card bg-base-100 shadow-sm">
           <div class="card-body gap-3 p-4">
             <PreviewControls />

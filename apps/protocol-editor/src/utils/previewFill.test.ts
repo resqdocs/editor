@@ -6,7 +6,7 @@ import { ref } from 'vue'
 import type { Protocol } from '@resqdocs/protocol-core/creator/creator.mjs'
 import { render } from '@resqdocs/protocol-core/renderer/render.mjs'
 import { usePreviewState } from '../composables/usePreviewState.ts'
-import { isFillable, listValueToText, listEntriesFromText } from './previewFill.ts'
+import { isFillable, listValueToText, listEntriesFromText, buildFillGroups, type FillVisibility } from './previewFill.ts'
 
 // ---- reine Helfer ----
 test('isFillable: text ist read-only, alle anderen Typen fuellbar', () => {
@@ -89,4 +89,89 @@ test('field „nicht erhoben“ ({excluded:true}) entfernt das Feld aus der Ausg
   assert.ok(render(p.value, ps.caseState.value).includes('- Feld:')) // Stub sichtbar
   ps.setValue('feld', { excluded: true })
   assert.ok(!render(p.value, ps.caseState.value).includes('- Feld:')) // n.e. -> weg
+})
+
+// ---- #258: optionale Blöcke an IHRER Position (statt Sammel-Sektion) ----
+const A_B_C = [
+  { id: 'A', title: 'A', points: [{ id: 'a1', type: 'field', label: 'A1' }] },
+  { id: 'B', title: 'B', optional: true, points: [{ id: 'b1', type: 'field', label: 'B1' }] },
+  { id: 'C', title: 'C', points: [{ id: 'c1', type: 'field', label: 'C1' }] },
+]
+function vis(opts: { visibleBlocks: Set<string>; activeBlocks?: Set<string> }): FillVisibility {
+  return {
+    blockVisible: (id) => opts.visibleBlocks.has(id),
+    isBlockActive: (id) => (opts.activeBlocks ?? new Set()).has(id),
+    pointVisible: () => true,
+    isReferenced: () => false,
+  }
+}
+
+test('#258 Anordnung: optionaler Block erscheint an SEINER Position (A, B, C), nicht gebündelt', () => {
+  const g = buildFillGroups(A_B_C, vis({ visibleBlocks: new Set(['A', 'B', 'C']), activeBlocks: new Set(['B']) }))
+  assert.deepEqual(g.map((x) => x.blockId), ['A', 'B', 'C'])
+  assert.equal(g[1].optional, true)
+})
+
+test('#258 inaktiver optionaler Block: bleibt an Position, nur Toggle (keine Controls)', () => {
+  // B inaktiv -> blockVisible(B)=false; A/C sichtbar
+  const g = buildFillGroups(A_B_C, vis({ visibleBlocks: new Set(['A', 'C']) }))
+  assert.deepEqual(g.map((x) => x.blockId), ['A', 'B', 'C']) // B weiterhin an Index 1
+  assert.equal(g[1].optional, true)
+  assert.equal(g[1].active, false)
+  assert.equal(g[1].visible, false)
+  assert.equal(g[1].controls.length, 0)
+})
+
+test('#258 aktiver optionaler Block: zeigt seine Controls an Position', () => {
+  const g = buildFillGroups(A_B_C, vis({ visibleBlocks: new Set(['A', 'B', 'C']), activeBlocks: new Set(['B']) }))
+  assert.equal(g[1].visible, true)
+  assert.equal(g[1].controls.length, 1)
+  assert.equal(g[1].controls[0].id, 'b1')
+})
+
+test('#258 leerer/unsichtbarer NORMALER Block wird übersprungen', () => {
+  const g = buildFillGroups(
+    [{ id: 'X', title: 'X', points: [{ id: 'x1', type: 'field' }] }],
+    vis({ visibleBlocks: new Set() }),
+  )
+  assert.equal(g.length, 0)
+})
+
+// ---- #258 Integration: Maske ↔ render() konsistent für optionale Blöcke ----
+function protoOpt(): Protocol {
+  return {
+    schemaVersion: '0.2.0',
+    id: 't',
+    title: 'T',
+    variables: [],
+    blocks: [
+      { id: 'a', title: 'A', points: [{ id: 'a1', type: 'field', label: 'A1' }] },
+      { id: 'opt', title: 'Opt', optional: true, points: [{ id: 'o1', type: 'field', label: 'O1' }] },
+      { id: 'c', title: 'C', points: [{ id: 'c1', type: 'field', label: 'C1' }] },
+    ],
+  } as Protocol
+}
+function visFromPreview(ps: ReturnType<typeof usePreviewState>): FillVisibility {
+  return {
+    blockVisible: (id) => ps.blockVisible(id),
+    isBlockActive: (id) => ps.isBlockActive(id),
+    pointVisible: (id) => ps.pointVisible(id),
+    isReferenced: (id) => ps.referencedPointIds.value.has(id),
+  }
+}
+
+test('#258 Integration: optionaler Block — Maske + render konsistent (inaktiv→Toggle, aktiv→Inhalt an Position)', () => {
+  const p = ref(protoOpt())
+  const ps = usePreviewState(p)
+  // inaktiv: Position erhalten, nur Toggle, render zeigt den Block NICHT
+  let g = buildFillGroups(p.value.blocks, visFromPreview(ps))
+  assert.deepEqual(g.map((x) => x.blockId), ['a', 'opt', 'c'])
+  assert.equal(g[1].visible, false)
+  assert.ok(!render(p.value, ps.caseState.value).includes('O1'))
+  // aktivieren: Controls an Position, render zeigt den Block an seiner Stelle
+  ps.toggleBlock('opt', true)
+  g = buildFillGroups(p.value.blocks, visFromPreview(ps))
+  assert.equal(g[1].visible, true)
+  assert.equal(g[1].controls[0].id, 'o1')
+  assert.ok(render(p.value, ps.caseState.value).includes('- O1:'))
 })

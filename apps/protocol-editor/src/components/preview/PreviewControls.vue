@@ -1,93 +1,34 @@
 <script setup lang="ts">
 /**
- * Interaktive Ausfuell-Maske der Live-Vorschau (#fulltest / Bug B): JEDER sichtbare, eingebbare
- * Punkt jedes sichtbaren Blocks bekommt ein typgerechtes Wert-Control — nicht mehr nur die
- * visibleIf-referenzierten. Damit spielt man das Protokoll wie ein echter Anwender durch:
- * Felder fuellen -> die gerenderte Vorschau zeigt Werte UND visibleIf-Logik live.
+ * Interaktive Ausfuell-Maske der Live-Vorschau (#fulltest / Bug B + #258): JEDER sichtbare,
+ * eingebbare Punkt jedes sichtbaren Blocks bekommt ein typgerechtes Wert-Control. Blöcke
+ * erscheinen in PROTOKOLLREIHENFOLGE; OPTIONALE Blöcke an IHRER Position mit Inline-Toggle
+ * (statt in einer Sammel-Sektion) — wie die App-Einsatzansicht (#49).
  *
  * Sichtbarkeit kommt aus den GETEILTEN runtime-Funktionen (preview.blockVisible/pointVisible,
- * die getVisibleBlocks/getVisiblePoints kapseln), damit Maske und gerenderte Ausgabe NIE
- * divergieren. referencedPointIds dient nur noch der Hervorhebung. KEINE Template-Mutation —
- * alles schreibt ausschliesslich in den fluechtigen caseState (usePreviewState).
+ * die getVisibleBlocks/getVisiblePoints kapseln), darum können Maske und gerenderte Ausgabe NIE
+ * divergieren. referencedPointIds dient nur der Hervorhebung. KEINE Template-Mutation — alles
+ * schreibt ausschliesslich in den fluechtigen caseState (usePreviewState).
  */
 import { computed } from 'vue'
 import { useEditor } from '@/composables/editorKey'
 import { usePreview } from '@/composables/editorKey'
 import type { Override } from '@resqdocs/protocol-core/renderer/render.mjs'
-import { listValueToText, listEntriesFromText } from '@/utils/previewFill'
+import { buildFillGroups, listValueToText, listEntriesFromText, type FillControl, type FillGroup } from '@/utils/previewFill'
 
 const editor = useEditor()
 const preview = usePreview()
 
-const optionalBlocks = computed(() => editor.blocks.value.filter((b) => b.optional))
-
-type FillKind = 'field' | 'finding' | 'list' | 'text' | 'medikamente'
-interface FillControl {
-  kind: FillKind
-  id: string
-  label: string
-  entries?: string[]
-  content?: string
-  referenced: boolean
-}
-interface FillGroup {
-  blockId: string
-  title: string
-  controls: FillControl[]
-}
-
-function plabel(p: Record<string, unknown>): string {
-  return String(p.title ?? p.label ?? p.id ?? '')
-}
-
-// Sichtbare Bloecke -> sichtbare Punkte -> typgerechte Controls. Gleiche Sichtbarkeit wie der
-// Renderer (preview.*Visible kapseln getVisibleBlocks/getVisiblePoints), darum kann nie ein Punkt
-// in der Maske auftauchen, der gerade nicht gerendert wird (und umgekehrt).
-const fillGroups = computed<FillGroup[]>(() => {
-  const out: FillGroup[] = []
-  for (const b of editor.blocks.value) {
-    if (!preview.blockVisible(b.id)) continue
-    const controls: FillControl[] = []
-    for (const p of b.points ?? []) {
-      if (!p.id || !preview.pointVisible(p.id)) continue
-      const bag = p as Record<string, unknown>
-      const referenced = preview.referencedPointIds.value.has(p.id)
-      switch (p.type) {
-        case 'field':
-          controls.push({ kind: 'field', id: p.id, label: plabel(bag), referenced })
-          break
-        case 'finding':
-          controls.push({ kind: 'finding', id: p.id, label: plabel(bag), referenced })
-          break
-        case 'findingGroup': {
-          const key = String(bag.key ?? '')
-          for (const f of (bag.findings as Array<Record<string, unknown>>) ?? []) {
-            if (typeof f.id === 'string') {
-              controls.push({
-                kind: 'finding',
-                id: f.id,
-                label: `${key} › ${plabel(f)}`,
-                referenced: preview.referencedPointIds.value.has(f.id),
-              })
-            }
-          }
-          break
-        }
-        case 'list':
-          controls.push({ kind: 'list', id: p.id, label: plabel(bag), entries: (bag.entries as string[]) ?? [], referenced })
-          break
-        case 'text':
-          controls.push({ kind: 'text', id: p.id, label: plabel(bag), content: String(bag.content ?? ''), referenced })
-          break
-        case 'medikamente':
-          controls.push({ kind: 'medikamente', id: p.id, label: plabel(bag), referenced })
-          break
-      }
-    }
-    if (controls.length) out.push({ blockId: b.id, title: String(b.title ?? b.id), controls })
-  }
-  return out
-})
+// Ausfuell-Gruppen in Dokumentreihenfolge (optionale Blöcke an Position, Inline-Toggle). Die
+// Sichtbarkeit/Status werden aus usePreviewState gespiegelt -> Maske ↔ Renderer bleiben konsistent.
+const fillGroups = computed<FillGroup[]>(() =>
+  buildFillGroups(editor.blocks.value, {
+    blockVisible: (id) => preview.blockVisible(id),
+    isBlockActive: (id) => preview.isBlockActive(id),
+    pointVisible: (id) => preview.pointVisible(id),
+    isReferenced: (id) => preview.referencedPointIds.value.has(id),
+  }),
+)
 
 function asStr(v: unknown): string {
   return v == null ? '' : String(v)
@@ -195,28 +136,31 @@ function setList(id: string, text: string): void {
       </div>
     </section>
 
-    <!-- Optionale Bloecke -->
-    <section v-if="optionalBlocks.length">
-      <h3 class="mb-1 text-sm font-semibold">Optionale Blöcke</h3>
-      <label v-for="b in optionalBlocks" :key="b.id" class="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
-          class="toggle toggle-sm"
-          :checked="preview.isBlockActive(b.id)"
-          @change="preview.toggleBlock(b.id, ($event.target as HTMLInputElement).checked)"
-        />
-        <span>{{ b.title }} aktivieren</span>
-      </label>
-    </section>
-
-    <!-- Protokoll ausfuellen: ein typgerechtes Control je sichtbarem, eingebbarem Punkt,
-         nach Block gruppiert; visibleIf-Subjekte sind als „Bedingung“ markiert. -->
+    <!-- Protokoll ausfuellen: ein typgerechtes Control je sichtbarem, eingebbarem Punkt, in
+         PROTOKOLLREIHENFOLGE. Optionale Blöcke an IHRER Position mit Inline-Toggle (#258). -->
     <section v-if="fillGroups.length">
       <h3 class="mb-1 text-sm font-semibold">Protokoll ausfüllen</h3>
       <div class="flex flex-col gap-3">
         <div v-for="g in fillGroups" :key="g.blockId" class="rounded border border-base-300 p-2">
-          <h4 class="mb-1 text-xs font-semibold text-base-content/70">{{ g.title }}</h4>
-          <div class="flex flex-col gap-2">
+          <!-- optionaler Block: Aktivierungs-Toggle inline an seiner Position -->
+          <label v-if="g.optional" class="mb-1 flex items-center gap-2 text-xs font-semibold">
+            <input
+              type="checkbox"
+              class="toggle toggle-xs"
+              :checked="g.active"
+              @change="preview.toggleBlock(g.blockId, ($event.target as HTMLInputElement).checked)"
+            />
+            <span class="truncate text-base-content/80">{{ g.title }}</span>
+            <span class="badge badge-outline badge-xs">optional</span>
+          </label>
+          <h4 v-else class="mb-1 text-xs font-semibold text-base-content/70">{{ g.title }}</h4>
+
+          <!-- Controls nur, wenn sichtbar (optional: aktiv && visibleIf); optionale eingerueckt -->
+          <div
+            v-if="g.visible && g.controls.length"
+            class="flex flex-col gap-2"
+            :class="g.optional ? 'ml-2 border-l-2 border-base-300 pl-3' : ''"
+          >
             <template v-for="c in g.controls" :key="c.id">
               <!-- field: Freitext + „nicht erhoben“ -->
               <label v-if="c.kind === 'field'" class="flex items-center gap-2 text-sm">
