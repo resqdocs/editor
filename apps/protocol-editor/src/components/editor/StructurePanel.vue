@@ -8,6 +8,7 @@
 import { useEditor } from '@/composables/editorKey'
 import { describePredicate } from '@/composables/visibleIfModel'
 import { POINT_TYPES, VARIABLE_TYPES, type PointType, type VariableType, type Predicate } from '@resqdocs/protocol-core/creator/creator.mjs'
+import { displayName } from '@/utils/displayName'
 
 const editor = useEditor()
 
@@ -97,7 +98,7 @@ function vis(x: { visibleIf?: unknown }): string {
             >
               <button class="flex flex-1 items-center gap-1 text-left" @click="p.id && editor.selectPoint(p.id)">
                 <span class="badge badge-primary badge-xs">{{ p.type }}</span>
-                <span class="text-sm">{{ p.label || (p as { key?: string }).key || p.id }}</span>
+                <span class="text-sm">{{ displayName(p) }}</span>
                 <span v-if="vis(p)" class="badge badge-ghost badge-xs" :title="vis(p)">bedingt</span>
               </button>
               <button class="btn btn-ghost btn-xs" :disabled="pi === 0" title="hoch" @click="p.id && editor.movePoint(p.id, 'up')">↑</button>

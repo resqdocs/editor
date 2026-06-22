@@ -1,51 +1,90 @@
 <script setup lang="ts">
 /**
- * Interaktive Vorschau-Steuerung (#224, Lern-Kern): leitet aus der Vorlage Eingabe-Controls ab
- * (Variablen je Typ, optionale Bloecke, Befund-Zustaende, von visibleIf referenzierte Punkte) und
- * fuettert damit den FLUECHTIGEN Vorschau-Zustand (usePreviewState). Damit sieht man live, wie
- * Variablen + visibleIf den Output und die Sichtbarkeit veraendern. KEINE Template-Mutation.
+ * Interaktive Ausfuell-Maske der Live-Vorschau (#fulltest / Bug B): JEDER sichtbare, eingebbare
+ * Punkt jedes sichtbaren Blocks bekommt ein typgerechtes Wert-Control — nicht mehr nur die
+ * visibleIf-referenzierten. Damit spielt man das Protokoll wie ein echter Anwender durch:
+ * Felder fuellen -> die gerenderte Vorschau zeigt Werte UND visibleIf-Logik live.
+ *
+ * Sichtbarkeit kommt aus den GETEILTEN runtime-Funktionen (preview.blockVisible/pointVisible,
+ * die getVisibleBlocks/getVisiblePoints kapseln), damit Maske und gerenderte Ausgabe NIE
+ * divergieren. referencedPointIds dient nur noch der Hervorhebung. KEINE Template-Mutation —
+ * alles schreibt ausschliesslich in den fluechtigen caseState (usePreviewState).
  */
 import { computed } from 'vue'
 import { useEditor } from '@/composables/editorKey'
 import { usePreview } from '@/composables/editorKey'
 import type { Override } from '@resqdocs/protocol-core/renderer/render.mjs'
+import { listValueToText, listEntriesFromText } from '@/utils/previewFill'
 
 const editor = useEditor()
 const preview = usePreview()
 
 const optionalBlocks = computed(() => editor.blocks.value.filter((b) => b.optional))
 
-interface FindingRow {
+type FillKind = 'field' | 'finding' | 'list' | 'text' | 'medikamente'
+interface FillControl {
+  kind: FillKind
   id: string
   label: string
-  group: string
+  entries?: string[]
+  content?: string
+  referenced: boolean
 }
-const findings = computed<FindingRow[]>(() => {
-  const out: FindingRow[] = []
-  for (const b of editor.blocks.value) {
-    for (const p of b.points ?? []) {
-      const bag = p as Record<string, unknown>
-      if (p.type === 'finding' && p.id) out.push({ id: p.id, label: String(p.label ?? p.id), group: String(b.title) })
-      if (p.type === 'findingGroup' && Array.isArray(bag.findings)) {
-        const key = String(bag.key ?? '')
-        for (const f of bag.findings as Array<Record<string, unknown>>) {
-          if (typeof f.id === 'string') out.push({ id: f.id, label: `${key} › ${String(f.label ?? f.id)}`, group: String(b.title) })
-        }
-      }
-    }
-  }
-  return out
-})
+interface FillGroup {
+  blockId: string
+  title: string
+  controls: FillControl[]
+}
 
-// Von visibleIf referenzierte NICHT-Befund-Punkte (Feld/Text/Liste/Medikamente) -> Wert-Control.
-const refPoints = computed<FindingRow[]>(() => {
-  const out: FindingRow[] = []
+function plabel(p: Record<string, unknown>): string {
+  return String(p.title ?? p.label ?? p.id ?? '')
+}
+
+// Sichtbare Bloecke -> sichtbare Punkte -> typgerechte Controls. Gleiche Sichtbarkeit wie der
+// Renderer (preview.*Visible kapseln getVisibleBlocks/getVisiblePoints), darum kann nie ein Punkt
+// in der Maske auftauchen, der gerade nicht gerendert wird (und umgekehrt).
+const fillGroups = computed<FillGroup[]>(() => {
+  const out: FillGroup[] = []
   for (const b of editor.blocks.value) {
+    if (!preview.blockVisible(b.id)) continue
+    const controls: FillControl[] = []
     for (const p of b.points ?? []) {
-      if (p.id && preview.referencedPointIds.value.has(p.id) && p.type !== 'finding' && p.type !== 'findingGroup') {
-        out.push({ id: p.id, label: String(p.label ?? p.id), group: String(b.title) })
+      if (!p.id || !preview.pointVisible(p.id)) continue
+      const bag = p as Record<string, unknown>
+      const referenced = preview.referencedPointIds.value.has(p.id)
+      switch (p.type) {
+        case 'field':
+          controls.push({ kind: 'field', id: p.id, label: plabel(bag), referenced })
+          break
+        case 'finding':
+          controls.push({ kind: 'finding', id: p.id, label: plabel(bag), referenced })
+          break
+        case 'findingGroup': {
+          const key = String(bag.key ?? '')
+          for (const f of (bag.findings as Array<Record<string, unknown>>) ?? []) {
+            if (typeof f.id === 'string') {
+              controls.push({
+                kind: 'finding',
+                id: f.id,
+                label: `${key} › ${plabel(f)}`,
+                referenced: preview.referencedPointIds.value.has(f.id),
+              })
+            }
+          }
+          break
+        }
+        case 'list':
+          controls.push({ kind: 'list', id: p.id, label: plabel(bag), entries: (bag.entries as string[]) ?? [], referenced })
+          break
+        case 'text':
+          controls.push({ kind: 'text', id: p.id, label: plabel(bag), content: String(bag.content ?? ''), referenced })
+          break
+        case 'medikamente':
+          controls.push({ kind: 'medikamente', id: p.id, label: plabel(bag), referenced })
+          break
       }
     }
+    if (controls.length) out.push({ blockId: b.id, title: String(b.title ?? b.id), controls })
   }
   return out
 })
@@ -54,10 +93,26 @@ function asStr(v: unknown): string {
   return v == null ? '' : String(v)
 }
 
-// ----- Befund-Zustand <-> Override -----
+// ----- field: Wert + "nicht erhoben" (#43 dreistufig). Wert-Shape: string | { excluded:true }. -----
+function fieldValue(id: string): string {
+  const ov = preview.getValue(id)
+  if (typeof ov === 'string') return ov
+  if (typeof ov === 'object' && ov !== null && 'value' in ov && typeof ov.value === 'string') return ov.value
+  return ''
+}
+function fieldExcluded(id: string): boolean {
+  const ov = preview.getValue(id)
+  return typeof ov === 'object' && ov !== null && 'excluded' in ov
+}
+function setFieldValue(id: string, text: string): void {
+  preview.setValue(id, text === '' ? undefined : text)
+}
+function setFieldExcluded(id: string, on: boolean): void {
+  preview.setValue(id, on ? { excluded: true } : undefined)
+}
+
+// ----- finding: Zustand <-> Override (genau die vier Renderer-Formen, #43/#71). -----
 type FindingChoice = 'standard' | 'normal' | 'abnormal' | 'excluded'
-// Diese Controls besitzen den vollen Schreib-Satz fuer Befund-Overrides (nur die vier Formen unten),
-// daher klassifiziert die Rueck-Lesung jeden sonstigen Wert als 'abnormal' (runtime: value-ohne-state ⇒ abnormal).
 function findingChoice(id: string): FindingChoice {
   const ov = preview.getValue(id)
   if (ov === undefined) return 'standard'
@@ -75,22 +130,13 @@ function setFinding(id: string, choice: FindingChoice): void {
   preview.setValue(id, map[choice])
 }
 
-// ----- Referenzierter Punkt: Wert / ausgeschlossen -----
-function pointFieldValue(id: string): string {
-  const ov = preview.getValue(id)
-  if (typeof ov === 'string') return ov
-  if (typeof ov === 'object' && ov !== null && 'value' in ov && typeof ov.value === 'string') return ov.value
-  return ''
+// ----- list: Textarea <-> string[]-Eintraege (Wert-Shape wie runtime.listEntries). -----
+function listText(c: FillControl): string {
+  return listValueToText(preview.getValue(c.id), c.entries ?? [])
 }
-function pointExcluded(id: string): boolean {
-  const ov = preview.getValue(id)
-  return typeof ov === 'object' && ov !== null && 'excluded' in ov
-}
-function setPointValue(id: string, text: string): void {
-  preview.setValue(id, text === '' ? undefined : text)
-}
-function setPointExcluded(id: string, on: boolean): void {
-  preview.setValue(id, on ? { excluded: true } : undefined)
+function setList(id: string, text: string): void {
+  const entries = listEntriesFromText(text)
+  preview.setValue(id, entries.length ? entries : undefined)
 }
 </script>
 
@@ -106,8 +152,8 @@ function setPointExcluded(id: string, on: boolean): void {
       </button>
     </div>
     <p class="text-xs text-base-content/60">
-      Flüchtiger Lern-/Demonstrations-Zustand — NICHT Teil der gespeicherten Vorlage. Verstelle Werte und
-      sieh rechts, wie sich Text + Sichtbarkeit (visibleIf) ändern.
+      Flüchtiger Lern-/Demonstrations-Zustand — NICHT Teil der gespeicherten Vorlage. Fülle die Punkte aus und
+      sieh rechts, wie sich Text + Sichtbarkeit (visibleIf) live ändern.
     </p>
 
     <!-- Variablen -->
@@ -163,44 +209,82 @@ function setPointExcluded(id: string, on: boolean): void {
       </label>
     </section>
 
-    <!-- Befund-Zustaende -->
-    <section v-if="findings.length">
-      <h3 class="mb-1 text-sm font-semibold">Befund-Zustände</h3>
-      <div class="flex flex-col gap-1">
-        <label v-for="f in findings" :key="f.id" class="flex items-center gap-2 text-sm">
-          <span class="w-40 shrink-0 truncate" :title="`${f.group}: ${f.label}`">{{ f.label }}</span>
-          <select
-            class="select select-xs select-bordered flex-1"
-            :value="findingChoice(f.id)"
-            @change="setFinding(f.id, ($event.target as HTMLSelectElement).value as FindingChoice)"
-          >
-            <option value="standard">Standard (Vorgabe)</option>
-            <option value="normal">normal</option>
-            <option value="abnormal">auffällig</option>
-            <option value="excluded">nicht erhoben</option>
-          </select>
-        </label>
-      </div>
-    </section>
+    <!-- Protokoll ausfuellen: ein typgerechtes Control je sichtbarem, eingebbarem Punkt,
+         nach Block gruppiert; visibleIf-Subjekte sind als „Bedingung“ markiert. -->
+    <section v-if="fillGroups.length">
+      <h3 class="mb-1 text-sm font-semibold">Protokoll ausfüllen</h3>
+      <div class="flex flex-col gap-3">
+        <div v-for="g in fillGroups" :key="g.blockId" class="rounded border border-base-300 p-2">
+          <h4 class="mb-1 text-xs font-semibold text-base-content/70">{{ g.title }}</h4>
+          <div class="flex flex-col gap-2">
+            <template v-for="c in g.controls" :key="c.id">
+              <!-- field: Freitext + „nicht erhoben“ -->
+              <label v-if="c.kind === 'field'" class="flex items-center gap-2 text-sm">
+                <span class="flex w-32 shrink-0 items-center gap-1 truncate" :class="c.referenced ? 'font-medium' : ''" :title="c.label">
+                  <span class="truncate">{{ c.label }}</span>
+                  <span v-if="c.referenced" class="badge badge-ghost badge-xs">Bedingung</span>
+                </span>
+                <input
+                  class="input input-xs input-bordered flex-1"
+                  :value="fieldValue(c.id)"
+                  :disabled="fieldExcluded(c.id)"
+                  placeholder="Wert"
+                  @input="setFieldValue(c.id, ($event.target as HTMLInputElement).value)"
+                />
+                <label class="flex items-center gap-1 text-xs">
+                  <input type="checkbox" class="checkbox checkbox-xs" :checked="fieldExcluded(c.id)" @change="setFieldExcluded(c.id, ($event.target as HTMLInputElement).checked)" />
+                  n.e.
+                </label>
+              </label>
 
-    <!-- Referenzierte Punkte (Feld/Text/Liste) -->
-    <section v-if="refPoints.length">
-      <h3 class="mb-1 text-sm font-semibold">Von Bedingungen referenzierte Punkte</h3>
-      <div class="flex flex-col gap-1">
-        <label v-for="p in refPoints" :key="p.id" class="flex items-center gap-2 text-sm">
-          <span class="w-32 shrink-0 truncate" :title="p.label">{{ p.label }}</span>
-          <input
-            class="input input-xs input-bordered flex-1"
-            :value="pointFieldValue(p.id)"
-            :disabled="pointExcluded(p.id)"
-            placeholder="Wert"
-            @input="setPointValue(p.id, ($event.target as HTMLInputElement).value)"
-          />
-          <label class="flex items-center gap-1 text-xs">
-            <input type="checkbox" class="checkbox checkbox-xs" :checked="pointExcluded(p.id)" @change="setPointExcluded(p.id, ($event.target as HTMLInputElement).checked)" />
-            n.e.
-          </label>
-        </label>
+              <!-- finding (auch findingGroup-Kinder): Zustands-Auswahl -->
+              <label v-else-if="c.kind === 'finding'" class="flex items-center gap-2 text-sm">
+                <span class="flex w-32 shrink-0 items-center gap-1 truncate" :class="c.referenced ? 'font-medium' : ''" :title="c.label">
+                  <span class="truncate">{{ c.label }}</span>
+                  <span v-if="c.referenced" class="badge badge-ghost badge-xs">Bedingung</span>
+                </span>
+                <select
+                  class="select select-xs select-bordered flex-1"
+                  :value="findingChoice(c.id)"
+                  @change="setFinding(c.id, ($event.target as HTMLSelectElement).value as FindingChoice)"
+                >
+                  <option value="standard">Standard (Vorgabe)</option>
+                  <option value="normal">normal</option>
+                  <option value="abnormal">auffällig</option>
+                  <option value="excluded">nicht erhoben</option>
+                </select>
+              </label>
+
+              <!-- list: ein Eintrag je Zeile -->
+              <label v-else-if="c.kind === 'list'" class="flex flex-col gap-1 text-sm">
+                <span class="flex items-center gap-1 truncate" :class="c.referenced ? 'font-medium' : ''" :title="c.label">
+                  <span class="truncate">{{ c.label }}</span>
+                  <span class="text-xs text-base-content/50">(ein Eintrag je Zeile)</span>
+                  <span v-if="c.referenced" class="badge badge-ghost badge-xs">Bedingung</span>
+                </span>
+                <textarea
+                  class="textarea textarea-xs textarea-bordered"
+                  rows="2"
+                  :value="listText(c)"
+                  placeholder="Eintrag je Zeile"
+                  @input="setList(c.id, ($event.target as HTMLTextAreaElement).value)"
+                ></textarea>
+              </label>
+
+              <!-- text: nur Anzeige (read-only) -->
+              <div v-else-if="c.kind === 'text'" class="flex items-center gap-2 text-sm text-base-content/60">
+                <span class="w-32 shrink-0 truncate" :title="c.label">{{ c.label }}</span>
+                <span class="flex-1 truncate text-xs">{{ c.content || '(Text)' }} — nur Anzeige</span>
+              </div>
+
+              <!-- medikamente: Stub (voller Zeilen-Editor folgt) -->
+              <div v-else-if="c.kind === 'medikamente'" class="flex items-center gap-2 text-sm">
+                <span class="w-32 shrink-0 truncate" :title="c.label">{{ c.label }}</span>
+                <span class="flex-1 text-xs text-base-content/50">Medikamente werden im Einsatz erfasst (Vorschau-Stub).</span>
+              </div>
+            </template>
+          </div>
+        </div>
       </div>
     </section>
   </div>

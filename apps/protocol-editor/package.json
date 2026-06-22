@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
-    "test": "node --test --experimental-strip-types src/composables/visibleIfModel.test.ts src/composables/useProtocolEditor.test.ts src/composables/importExport.test.ts src/composables/usePreviewState.test.ts src/data/examples.test.ts src/data/learnContent.test.ts"
+    "test": "node --test --experimental-strip-types src/composables/visibleIfModel.test.ts src/composables/useProtocolEditor.test.ts src/composables/importExport.test.ts src/composables/usePreviewState.test.ts src/data/examples.test.ts src/data/learnContent.test.ts src/utils/displayName.test.ts src/composables/derivePointId.test.ts src/utils/previewFill.test.ts"
   },
   "dependencies": {
     "@resqdocs/protocol-core": "file:../../packages/shared",

@@ -43,7 +43,7 @@ const visibleIf = computed<Predicate | undefined>(() => (point.value?.visibleIf 
     <!-- Label (Basis) — fuer alle ausser reinem text/findingGroup sinnvoll, aber Schema erlaubt es ueberall -->
     <label v-if="point.type !== 'text'" class="form-control">
       <span class="label-text">Label</span>
-      <input class="input input-sm input-bordered" :value="asStr(point.label)" @input="set({ label: ($event.target as HTMLInputElement).value })" />
+      <input class="input input-sm input-bordered" :value="asStr(point.label)" @input="set({ label: ($event.target as HTMLInputElement).value })" @blur="pid && editor.deriveIdFromName(pid)" />
     </label>
 
     <!-- text -->
@@ -56,7 +56,7 @@ const visibleIf = computed<Predicate | undefined>(() => (point.value?.visibleIf 
     <template v-if="point.type === 'field'">
       <label class="form-control">
         <span class="label-text">Anzeige-Titel (optional)</span>
-        <input class="input input-sm input-bordered" :value="asStr(field('title'))" @input="set({ title: ($event.target as HTMLInputElement).value } as Partial<Point>)" />
+        <input class="input input-sm input-bordered" :value="asStr(field('title'))" @input="set({ title: ($event.target as HTMLInputElement).value } as Partial<Point>)" @blur="pid && editor.deriveIdFromName(pid)" />
       </label>
       <label class="form-control">
         <span class="label-text">Default-Wert (optional)</span>

@@ -7,6 +7,7 @@
  */
 import { computed } from 'vue'
 import { useEditor, usePreview } from '@/composables/editorKey'
+import { displayName } from '@/utils/displayName'
 
 const editor = useEditor()
 const preview = usePreview()
@@ -50,7 +51,7 @@ function token(k: string): string {
             </div>
             <ul v-if="preview.blockVisible(b.id)" class="pl-5 text-xs">
               <li v-for="(p, i) in b.points ?? []" :key="p.id ?? i" :class="preview.pointVisible(p.id) ? '' : 'text-base-content/40 line-through'">
-                {{ p.label || (p as { key?: string }).key || p.id }}
+                {{ displayName(p) }}
                 <span v-if="p.visibleIf && !preview.pointVisible(p.id)">— ausgeblendet</span>
               </li>
             </ul>

@@ -9,6 +9,8 @@
 // PROXY-GRENZE (bug-089/#40): creator klont via structuredClone, was an Vue-Reactive-Proxies
 // scheitert. Darum wird VOR jedem creator-Aufruf mit toRaw() entpackt; nur Lesen bleibt reaktiv.
 import { computed, ref, toRaw, type Ref } from 'vue'
+import { displayName } from '../utils/displayName.ts'
+import { isPointReferenced, computeDerivedId, withPointId } from '../utils/derivePointId.ts'
 import {
   createProtocol,
   duplicateProtocol,
@@ -95,6 +97,10 @@ export function useProtocolEditor(initial: Protocol) {
   const selectedPointId = ref<string | null>(null)
   const selectedVariableId = ref<string | null>(null)
   const lastError = ref<string | null>(null)
+  // A2 (#70): ids frisch via addPoint angelegter Punkte, deren id noch EINMALIG aus dem ersten
+  // echten Titel/Label abgeleitet werden darf. Nach Ableitung (oder Einfrieren) entfernt; bei
+  // jedem Vorlagen-Wechsel geleert. Editor-lokales Bookkeeping — KEIN Bestandteil der Vorlage.
+  const derivablePointIds = new Set<string>()
 
   const raw = (): Protocol => toRaw(protocol.value)
 
@@ -133,7 +139,7 @@ export function useProtocolEditor(initial: Protocol) {
     for (const b of blocks.value) {
       for (const p of b.points ?? []) {
         if (typeof p.id === 'string' && p.id) {
-          refs.push({ id: p.id, label: String(p.label ?? p.id), group: String(b.title ?? b.id) })
+          refs.push({ id: p.id, label: displayName(p), group: String(b.title ?? b.id) })
         }
         if (p.type === 'findingGroup') {
           const bag = p as Record<string, unknown>
@@ -141,7 +147,7 @@ export function useProtocolEditor(initial: Protocol) {
           const key = String(bag.key ?? '')
           for (const f of findings) {
             if (typeof f.id === 'string' && f.id) {
-              refs.push({ id: f.id, label: `${key} › ${String(f.label ?? f.id)}`, group: String(b.title ?? b.id) })
+              refs.push({ id: f.id, label: `${key} › ${displayName(f)}`, group: String(b.title ?? b.id) })
             }
           }
         }
@@ -209,11 +215,40 @@ export function useProtocolEditor(initial: Protocol) {
     if (commit((p) => cAddPoint(p, blockId, defaultPointInput(type)))) {
       const after = (blocks.value.find((b) => b.id === blockId)?.points ?? []).map((p) => p.id ?? '')
       const created = newIdAmong(before, after)
-      if (created) selectPoint(created)
+      if (created) {
+        selectPoint(created)
+        derivablePointIds.add(created) // A2: frische Auto-id, einmalig aus Titel/Label ableitbar
+      }
     }
   }
   function updatePoint(pointId: string, patch: Partial<Point>): void {
     commit((p) => cUpdatePoint(p, pointId, patch))
+  }
+  /**
+   * A2 (#70): leitet die id eines FRISCH angelegten Punkts EINMALIG aus Titel/Label ab (Trigger:
+   * on blur des Titel-/Label-Felds). Sicher OHNE Remap, weil nur ausgefuehrt, solange
+   * (a) die id noch "auto" ist (in derivablePointIds), (b) KEIN visibleIf sie referenziert und
+   * (c) die Basis (Titel||Label) nicht leer ist. Danach eingefroren — eine bereits referenzierte
+   * oder schon abgeleitete id wird NIE veraendert (kein stilles Brechen).
+   */
+  function deriveIdFromName(pointId: string): void {
+    if (!derivablePointIds.has(pointId)) return // schon abgeleitet / nicht-auto -> nichts tun
+    const proto = toRaw(protocol.value)
+    let pt: Point | undefined
+    for (const b of proto.blocks ?? []) {
+      const found = (b.points ?? []).find((x) => x.id === pointId)
+      if (found) { pt = found; break }
+    }
+    if (!pt) { derivablePointIds.delete(pointId); return }
+    if (isPointReferenced(proto, pointId)) return // (b) referenziert -> NIE ableiten (das waere A1)
+    const base = String((pt as Record<string, unknown>).title ?? '').trim() || String(pt.label ?? '').trim()
+    if (!base) return // (c) leere Basis -> bleibt ableitbar, KEIN Rueckfall auf Roh-/Default-id
+    const newId = computeDerivedId(proto, pointId, base)
+    derivablePointIds.delete(pointId) // EINMALIG: ab dem ersten echten Namen eingefroren
+    if (!newId) return // id ist bereits sprechend genug
+    if (commit((p) => withPointId(p, pointId, newId)) && selectedPointId.value === pointId) {
+      selectedPointId.value = newId // Auswahl auf die neue id nachziehen
+    }
   }
   function removePoint(pointId: string): void {
     if (commit((p) => cRemovePoint(p, pointId)) && selectedPointId.value === pointId) selectedPointId.value = null
@@ -251,16 +286,19 @@ export function useProtocolEditor(initial: Protocol) {
   // ----- Draft laden / zuruecksetzen -----
   function loadDraft(p: Protocol): void {
     protocol.value = toDraft(p)
+    derivablePointIds.clear()
     selectBlock(null)
     lastError.value = null
   }
   function newEmpty(): void {
     protocol.value = createProtocol({ title: 'Neues Protokoll' })
+    derivablePointIds.clear()
     selectBlock(null)
     lastError.value = null
   }
   function duplicateCurrent(): void {
     protocol.value = duplicateProtocol(raw())
+    derivablePointIds.clear()
     selectBlock(null)
     lastError.value = null
   }
@@ -283,6 +321,7 @@ export function useProtocolEditor(initial: Protocol) {
     const res = parseImport(text)
     if (res.ok) {
       protocol.value = ensureProtocolPointIds(res.protocol)
+      derivablePointIds.clear()
       selectBlock(null)
       lastError.value = null
       return { ok: true, errors: [], warnings: res.warnings }
@@ -319,6 +358,7 @@ export function useProtocolEditor(initial: Protocol) {
     duplicatePoint,
     movePoint,
     setPointVisibleIf,
+    deriveIdFromName,
     addVariable,
     updateVariable,
     removeVariable,
